@@ -1,0 +1,9 @@
+successor-q sent (0xbf0a5ea2)
+successor-r received (0xbf0a5ea2 0x270056fe 46445)
+update-q sent (0x270056fe 0xda5e7b2c 49471 0)
+update-r received (0x270056fe 1 0xda5e7b2c 49471 0)
+update-q sent (0xbf0a5ea2 0xda5e7b2c 49471 1)
+update-r received (0xbf0a5ea2 1 0xda5e7b2c 49471 1)
+client echo created with hash 0xda5e7b2c
+update-q received (0xda5e7b2c 0xd9aa956e 43385 0)
+update-r sent (0xda5e7b2c 1 0xd9aa956e 43385 0)

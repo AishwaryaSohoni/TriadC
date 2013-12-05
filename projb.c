@@ -156,6 +156,14 @@ int main(int argc, char *argv[])
 			AddEndClntNode(sText);
 			AddMgrJobNode(ENDJOB);
 		}
+		if (strcmp(sKeyword, "kill_client") == 0){
+			if (sscanf(confile_buf, "%s %s", sKeyword, sText) != 2)
+				errexit("config file wrong store statement.\n");
+			
+			// add kill job
+			AddKillClientName(sText);
+			AddMgrJobNode(KILLJOB);
+		}	
 	}
 
 	// Check if configuration parameter read successfully
@@ -177,6 +185,13 @@ void errexit(char *msg)
 {
        printf("projb error: %s", msg);
        exit(1);
+}
+
+void AddKillClientName(char *name){
+
+	printf("In addkillclientname : %s\n",name);
+	strncpy(killName,name,MAX_CLIENT_NAME_SIZE);
+
 }
 
 void AddClientNameNode(char *name){

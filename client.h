@@ -169,6 +169,7 @@ int JoinRing(int sock);
 int FindNeighbor(int sock, int msgtype, TNode na, TNode *pnb);
 void LogTyiadMsg(int type, int sorr, char *buf);
 int UpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode);
+int HandleKillMessage(char *str);
 int HandleUdpMessage(int sock);
 int HandleStoreMsg(int sock, char *str);
 int HandleSearchMsg(int sock, char *str);

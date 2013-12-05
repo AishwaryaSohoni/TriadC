@@ -1,0 +1,13 @@
+predecessor-q sent (0xbf0a5ea2)
+predecessor-r received (0xbf0a5ea2 0xab9558d5 45647)
+predecessor-q sent (0xab9558d5)
+predecessor-r received (0xab9558d5 0x47efa23d 38752)
+predecessor-q sent (0x47efa23d)
+predecessor-r received (0x47efa23d 0xbf0a5ea2 38192)
+update-q sent (0x47efa23d 0x270056fe 46445 0)
+update-r received (0x47efa23d 1 0x270056fe 46445 0)
+update-q sent (0xbf0a5ea2 0x270056fe 46445 1)
+update-r received (0xbf0a5ea2 1 0x270056fe 46445 1)
+client delta created with hash 0x270056fe
+update-q received (0x270056fe 0xda5e7b2c 49471 0)
+update-r sent (0x270056fe 1 0xda5e7b2c 49471 0)

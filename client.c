@@ -219,14 +219,21 @@ int client(int mgrport)
   }
   
   char  sstr[MAX_TEXT_SIZE] = {0};
-  
+  int ret;
   // main select loop
   while(1) {
 
     readset = allset;
-    if (select(sockMax+1, &readset, NULL, NULL, &tv) == -1) {
+    ret = select(sockMax+1,&readset,NULL,NULL,&tv);
+    if (ret == -1) {
       errexit("client select.\n");
     }
+    else if(ret == 0)
+	{
+
+
+	}
+    else{
  
     // handle messages from other clients over UDP
     if (FD_ISSET(udpSock, &readset)) {
@@ -297,6 +304,39 @@ int client(int mgrport)
           }
           
         }
+        else if(strcmp(szRecvbuf, "kill_client") == 0) {
+          // handle kill command  
+          memset(sstr, 0, sizeof(sstr));
+          if ((nRecvbyte = RecvStreamLineForSelect(nSockwkr, sstr, sizeof(sstr))) <= 0){
+            printf("projb client %s error: recv kill string from manager!\n", Myname);
+            break;
+          }
+          sstr[nRecvbyte-1] = '\0';
+         
+	  printf("Client received kill command. To kill : %s \n",sstr); 
+	  int ret;
+		ret = HandleKillMessage(sstr); 
+          if(ret < 0 ){
+            printf("projb client %s error: handle store msg from manager!\n", Myname);
+            break;
+          }
+	  else if(ret == 0)
+		break;
+	  else{
+		printf("Ending %s\n",Myname);
+		// tell manger ok
+	        snprintf(szSendbuf, sizeof(szSendbuf), "ok\n");
+        	nSendlen = strlen(szSendbuf);
+        
+	        if (SendStreamData(nSockwkr, szSendbuf, nSendlen) < 0){
+        	  printf("projb worker %d error: send ok back to manager error! Exit!\n", nPid);
+	          return -1;
+       		 }
+		//Then exit
+		exit(0);
+		}
+          
+        }	
         else if(strcmp(szRecvbuf, "end_client") == 0) {
           // handle end_client command
           memset(sstr, 0, sizeof(sstr));
@@ -329,6 +369,7 @@ int client(int mgrport)
 
       } // end jobs assignment
     } // end manager socket handling
+   }//end else
   } // end select loop
   
   close(nSockwkr);
@@ -1580,6 +1621,19 @@ int HandleStoreMsg(int sock, char *str){
   }
   
   return ret;
+}
+
+int HandleKillMessage(char *str){
+
+//	unsigned int str_hash = gethashid(nMgrNonce,str);
+//	TNode res;
+//	FindSuccWithFT(sock,str,&res);
+	printf("Handle kill message in %s, str: %s\n",Myname,str);	
+	
+	if(strcmp(Myname,str) == 0)
+		return 1;
+	else return 0;	
+
 }
 
 int HandleSearchMsg(int sock, char *str){

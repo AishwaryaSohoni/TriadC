@@ -45,6 +45,7 @@ typedef struct ClientName
 	char namestr[MAX_CLIENT_NAME_SIZE];
 	int tcpsock;    // reserved
 	unsigned short udpport;
+	int acceptDesc;
 	struct ClientName *next;
 }CNAME, *pCName;
 extern pCName CNameHead;
@@ -76,6 +77,7 @@ typedef struct MgrJobList{
 extern pmgrjob MgrjobHead;
 extern pmgrjob MgrjobTail;
 extern int nMgrjob;
+extern char killName[MAX_CLIENT_NAME_SIZE];
 
 typedef struct EndClntNode{
 	char namestr[MAX_CLIENT_NAME_SIZE];
@@ -88,9 +90,11 @@ extern int nEndClnt;
 #define STRJOB 1   // store
 #define SCHJOB 2   // search
 #define ENDJOB 3   // end_client
+#define KILLJOB 4 //kill client
 
 void errexit(char *msg);
 void AddClientNameNode(char *name);
+void AddKillClientName(char *name);
 void AddStoreTextNode(char *text);
 void AddSearchTextNode(char *str);
 void AddMgrJobNode(int job);

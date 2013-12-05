@@ -45,10 +45,15 @@
 #include "comm.h"
 #include "sha1.h"
 
+typedef struct clientInfo{
 
+	char ClientName[100][MAX_CLIENT_NAME_SIZE];
+	unsigned short PortNum[100];
+}CInfo;
 
 
 int nWrknum = 0;
+char killName[MAX_CLIENT_NAME_SIZE];
 char logfilename[256] = {0};
 
 int sockMax;
@@ -62,6 +67,8 @@ int manager(void)
 	socklen_t nsinSize;
 	int nPort = 0;
 	int i;
+	
+	CInfo clients;	
 	
 	// print state.
 	printf("projb manager: num_nodes: %d, nonce: %d\n", nClient, nNonce);
@@ -182,8 +189,10 @@ int manager(void)
 						// send nonce and name and name and port
 						if (pcnPos == CNameHead){    // first client
 							snprintf(szSendbuf, sizeof(szSendbuf), "%s\n%s\n%d\n%s\n", szNonce, CNameHead->namestr, 0, CNameHead->namestr);
+							pcnPos->acceptDesc = newsock;
 						}else{		//not the first client
 							snprintf(szSendbuf, sizeof(szSendbuf), "%s\n%s\n%d\n%s\n", szNonce, pcnPos->namestr, CNameHead->udpport, CNameHead->namestr);
+							pcnPos->acceptDesc = newsock;	
 						}
 						nBytestosend = strlen(szSendbuf);
 						if (SendStreamData(newsock, szSendbuf, nBytestosend) < 0){
@@ -282,7 +291,9 @@ int manager(void)
 							break;
 						}
 						
+						
 						szRecvbuf[nRecvbytes-1] = '\0';
+						printf("Received buffer is : %s\n",szRecvbuf);
 						if (strcmp(szRecvbuf, "ok") != 0){
 							printf("projb manager exceptioin: recv unknown reply form first node: %s\n", szRecvbuf);
 							nExit = 1;
@@ -295,7 +306,23 @@ int manager(void)
 						}
 						
 						// assign next job
-						if (curjob->jobtype == STRJOB){    // store
+						if(curjob->jobtype == KILLJOB){
+							pCName itrPos;
+							printf("inside killjob name is : %s",killName);
+							for(itrPos = CNameHead;itrPos!= CNameTail;itrPos = itrPos->next)
+								if(strcmp(killName,itrPos->namestr) == 0)
+									break;
+							if(strcmp(killName,itrPos->namestr) == 0){
+								snprintf(szSendbuf,sizeof(szSendbuf),"kill_client\n%s\n",killName);
+								nBytestosend = strlen(szSendbuf);
+								SendStreamData(itrPos->acceptDesc,szSendbuf,nBytestosend);
+								printf("Sending Kill to %s\n",szSendbuf);
+								sleep(5);
+								printf("Manager is back!");
+							}
+
+						}
+						else if (curjob->jobtype == STRJOB){    // store
 							snprintf(szSendbuf, sizeof(szSendbuf), "store\n%s\n", pstPos->txt);
 							nBytestosend = strlen(szSendbuf);
 							if(SendStreamData(CNameHead->tcpsock, szSendbuf, nBytestosend) < 0){
@@ -351,6 +378,7 @@ int manager(void)
 						}
 						
 						szRecvbuf[nRecvbytes-1] = '\0';
+						printf("Received Line other case %s\n",szRecvbuf);
 						if (strcmp(szRecvbuf, "ok") != 0){
 							printf("projb manager exceptioin: recv unknown reply form first node: %s\n", szRecvbuf);
 							nExit = 1;
