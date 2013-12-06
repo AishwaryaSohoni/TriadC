@@ -68,8 +68,6 @@ int manager(void)
 	int nPort = 0;
 	int i;
 	
-	CInfo clients;	
-	
 	// print state.
 	printf("projb manager: num_nodes: %d, nonce: %d\n", nClient, nNonce);
 	

@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <arpa/inet.h>
+#include "timers-c.h"
 
 #include "projb.h"
 #include "client.h"
@@ -61,6 +62,18 @@ TNode pred; // predecessor node
 
 
 char logfilename[256];
+
+struct TestTimer1_context {
+	int count;
+};
+
+//The timer callback function
+int TestTimer1_expire(void *context)
+{
+	printf("Timer for client %s  expired. Starting new timer.\n",Myname);
+	return 0;
+}
+
 
 //
 // XXX Read and understand this function first!
@@ -100,10 +113,7 @@ int client(int mgrport)
   //char  szWritebuf[256];
   
   
-  fd_set  readset;
-  fd_set  allset;
-  struct timeval tv;
-
+  
   // Create socket
   if ((nSockwkr = socket(AF_INET, SOCK_STREAM, 0)) == -1){
     printf("projb worker %d error: create socket error! Exit!\n", nPid);
@@ -205,8 +215,12 @@ int client(int mgrport)
   }
   
   // use select to multiplex communication
-  tv.tv_sec = SELECT_TIMEOUT; 
-  tv.tv_usec = 0;
+  fd_set  readset;
+  fd_set  allset;
+  struct timeval tmv;
+
+  tmv.tv_sec = SELECT_TIMEOUT; 
+  tmv.tv_usec = 0;
   int sockMax;
   
   FD_ZERO(&allset);
@@ -220,18 +234,50 @@ int client(int mgrport)
   
   char  sstr[MAX_TEXT_SIZE] = {0};
   int ret;
+	static struct TestTimer1_context tt1_ctx;  
+  //Add timer to timer queue
+	getTime(&tmv);
+
+	fprintf(stderr,"Start Time = %d.%06d\n",
+		(int)tmv.tv_sec, (int)tmv.tv_usec);
+
+	// Create callback classes and set up pointers
+	tt1_ctx.count = 0;
+	Timers_AddTimer(1000, TestTimer1_expire, (void*)&tt1_ctx);
+
+  
   // main select loop
   while(1) {
+  
+	Timers_NextTimerTime(&tmv);
+	if (tmv.tv_sec == 0 && tmv.tv_usec == 0) {
+		// No Timer have been defined 
+			Timers_ExecuteNextTimer();
+		continue;
+	}
+	if (tmv.tv_sec == MAXVALUE && tmv.tv_usec == 0){
+	  /* There are no timers in the event queue */
+			break;
+	}
 
     readset = allset;
-    ret = select(sockMax+1,&readset,NULL,NULL,&tv);
+    ret = select(sockMax+1,&readset,NULL,NULL,&tmv);
     if (ret == -1) {
       errexit("client select.\n");
     }
     else if(ret == 0)
 	{
-
-
+		printf("EXPIRED!!!\n");
+			/* Timer expired, Hence process it  */
+			        Timers_ExecuteNextTimer();
+				/* Execute all timers that have expired.
+				Timers_NextTimerTime(&tmv);
+				while(tmv.tv_sec == 0 && tmv.tv_usec == 0) {
+					* Timer at the head of the queue has expired  
+				        Timers_ExecuteNextTimer();
+					Timers_NextTimerTime(&tmv);
+					
+				}*/
 	}
     else{
  
