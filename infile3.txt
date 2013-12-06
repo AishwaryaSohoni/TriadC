@@ -12,8 +12,9 @@ start_client foxtrot
 store alpha
 store beta
 store gamma
-kill_client charlie
+#kill_client charlie
 store delta
 store epsilon
 search beta
 search delta
+kill_client charlie

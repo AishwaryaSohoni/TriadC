@@ -49,6 +49,7 @@ unsigned int    HashID;// my hash id
 unsigned int    HashIDfirst;   // first node hash id
 char            Myname[MAX_CLIENT_NAME_SIZE] = {0};  // Triad string name of self
 unsigned short  MyUDPPort;  // my udp port
+int MyUDPSock;//my udp sock
 unsigned short  FirstNodePort; // first created node port
 char            FirstNodeName[MAX_CLIENT_NAME_SIZE] = {0};
 unsigned int    nMgrNonce = 0;
@@ -60,7 +61,7 @@ FTNODE  MyFT[FTLEN];  // finger table
 TNode succ; // successor node
 TNode pred; // predecessor node
 
-
+int succAlive;
 char logfilename[256];
 
 struct TestTimer1_context {
@@ -71,6 +72,15 @@ struct TestTimer1_context {
 int TestTimer1_expire(void *context)
 {
 	printf("Timer for client %s  expired. Starting new timer.\n",Myname);
+	if(succAlive)
+	{
+		printf("I'm %s....My successor is alive\n",Myname);
+		succAlive = 0;
+	}
+	else
+		printf("I'm %s....My successor is dead\n",Myname);
+	
+	SendHelloPredecQuery();
 	return 0;
 }
 
@@ -175,7 +185,8 @@ int client(int mgrport)
     return -1;
   }
   MyUDPPort = ntohs(sinWkrcopy.sin_port);
-  
+  MyUDPSock = udpSock;
+ 
   // Triad: calculate ID, join ring
   HashID = gethashid(nMgrNonce, Myname);
   HashIDfirst = gethashid(nMgrNonce, FirstNodeName);
@@ -243,7 +254,7 @@ int client(int mgrport)
 
 	// Create callback classes and set up pointers
 	tt1_ctx.count = 0;
-	Timers_AddTimer(1000, TestTimer1_expire, (void*)&tt1_ctx);
+	Timers_AddTimer(3000, TestTimer1_expire, (void*)&tt1_ctx);
 
   
   // main select loop
@@ -267,7 +278,7 @@ int client(int mgrport)
     }
     else if(ret == 0)
 	{
-		printf("EXPIRED!!!\n");
+	//	printf("EXPIRED!!!\n");
 			/* Timer expired, Hence process it  */
 			        Timers_ExecuteNextTimer();
 				/* Execute all timers that have expired.
@@ -784,6 +795,30 @@ void InitFingerTableSelf(){
   }
 }
 
+void SendHelloPredecQuery(){
+
+	NGQM qrymsg;
+	struct sockaddr_in naaddr;
+	char sendbuf[128];
+	int nSendbytes;
+	qrymsg.msgid = htonl(HELLOPQ);
+	qrymsg.ni = htonl(succ.id);
+	memcpy(sendbuf, &qrymsg, sizeof(NGQM));
+  
+	naaddr.sin_family = AF_INET;
+	naaddr.sin_port = htons(succ.port);
+	naaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  
+  	// to be simple, just assume sendto always send all data required.
+	if ((nSendbytes = sendto(MyUDPSock, sendbuf, sizeof(NGQM), 0, (struct sockaddr *)&naaddr, sizeof(naaddr))) != sizeof(NGQM)){
+    		printf("projb error: SendHelloPredecQuery sendto ret %d, should send %u\n", nSendbytes, sizeof(NGQM));
+	}
+	
+	printf("In SendHelloQuery. Sent %d bytes",nSendbytes);	  
+	 // write log
+	LogTyiadMsg(HELLOPQ, SENTFLAG, sendbuf);
+}
+
 int FindNeighbor(int sock, int msgtype, TNode na, TNode *pnb){
   NGQM  qrymsg;
   NGRM  *pngr;
@@ -958,11 +993,30 @@ int UpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
     /**********************************************************************
     *** for stage >= 6, needs to judge if the hello messages comes here ******
     **********************************************************************/
-    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, NULL, NULL)) != sizeof(UPRM)){
+	struct sockaddr_in cliaddr;
+socklen_t sa_len = sizeof(cliaddr);	
+    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) != sizeof(UPRM)){
       printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
       return -1;
     }
-    LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
+	int *tmp;
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr, NULL)) != sizeof(UPRM)){
+		      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+		      return -1;
+		    }		
+	}
+	LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
+ 
   }
   
   // then, update someone's successor
@@ -1071,6 +1125,45 @@ int UpdateMyFingerTable(int sock, TNode s, int idx){
   return 0;
 }
 
+void WrongPlaceHelloQuery(char *recvbuf,struct sockaddr_in *cliaddr){
+	pngqm nptr;
+	nptr = (pngqm)recvbuf;
+	 char  sendbuf[256];	
+	socklen_t sa_len = sizeof(cliaddr);
+	int sendlen;
+	//sanity check
+	if(ntohl(nptr->ni) == HashID){
+	//	printf("Hello q id : %08x HashId %08x",ntohl(nptr->ni),HashID);
+		 LogTyiadMsg(HELLOPQ, RECVFLAG, recvbuf);
+    
+	    	NGRM helloprlp;
+		helloprlp.msgid = htonl(HELLOPR);
+	    	helloprlp.ni = htonl(HashID);
+    		helloprlp.si = htonl(pred.id);
+	    	helloprlp.sp = htonl(pred.port);
+    		memcpy(sendbuf, &helloprlp, sizeof(helloprlp));
+	    	if ((sendlen = sendto(MyUDPSock, sendbuf, sizeof(helloprlp), 0, (struct sockaddr *)&cliaddr, sa_len)) != sizeof(helloprlp)){
+		      	printf("projb error: HandleUdpMessage sendto ret %d, shoulde send %u\n", sendlen, sizeof(helloprlp));
+    		}
+		//printf("\n\nHELLOPQ sent %d bytes \n\n",sendlen);
+	    	LogTyiadMsg(HELLOPR, SENTFLAG, sendbuf);
+	}
+}
+
+void WrongPlaceHelloReply(char *recvbuf,struct sockaddr_in *cliaddr){
+
+	pngrm nrptr;
+	nrptr = (pngrm)recvbuf;
+	//sanity check
+	if(ntohl(nrptr->si) == HashID){
+		printf("\nREPLY AAAAALLLAAA\n");
+		LogTyiadMsg(HELLOPR, RECVFLAG, recvbuf);
+		succAlive = 1;
+ 	}
+
+
+}
+
 int HandleUdpMessage(int sock){
   struct sockaddr_in  cliaddr;
   //int sa_len = sizeof(cliaddr);
@@ -1082,6 +1175,8 @@ int HandleUdpMessage(int sock){
   int msgtype;
   int *tmp;
   pupqm ptr;
+  pngqm nptr;
+  pngrm nrptr;
   int ret;
   
   
@@ -1096,6 +1191,40 @@ int HandleUdpMessage(int sock){
   msgtype = ntohl(*tmp);
   
   switch(msgtype){
+  case HELLOPQ:
+	printf("\nSomeone received hello query\n");
+	nptr = (pngqm)recvbuf;
+
+	//sanity check
+	if(ntohl(nptr->ni) == HashID){
+		printf("Hello q id : %08x HashId %08x",ntohl(nptr->ni),HashID);
+		 LogTyiadMsg(HELLOPQ, RECVFLAG, recvbuf);
+    
+	    	NGRM helloprlp;
+		helloprlp.msgid = htonl(HELLOPR);
+	    	helloprlp.ni = htonl(HashID);
+    		helloprlp.si = htonl(pred.id);
+	    	helloprlp.sp = htonl(pred.port);
+    		memcpy(sendbuf, &helloprlp, sizeof(helloprlp));
+	    	if ((sendlen = sendto(sock, sendbuf, sizeof(helloprlp), 0, (struct sockaddr *)&cliaddr, sa_len)) != sizeof(helloprlp)){
+		      	printf("projb error: HandleUdpMessage sendto ret %d, shoulde send %u\n", sendlen, sizeof(helloprlp));
+  			return -1;
+    		}
+		printf("\n\nHELLOPQ sent %d bytes \n\n",sendlen);
+	    	LogTyiadMsg(HELLOPR, SENTFLAG, sendbuf);
+	}
+	break;
+
+  case HELLOPR:
+	nrptr = (pngrm)recvbuf;
+	//sanity check
+	if(ntohl(nrptr->si) == HashID){
+		printf("\nREPLY AAAAALLLAAA\n");
+		LogTyiadMsg(HELLOPR, RECVFLAG, recvbuf);
+		succAlive = 1;
+ 	}
+	break;
+
   case SUCCQ:
 //    if ((recvlen = recvfrom(sock, recvbuf+sizeof(int), sizeof(int), 0, (struct sockaddr *)&cliaddr, &sa_len)) != sizeof(int)){
 //      printf("projb error: HandleUdpMessage recvfrom ret %d, shoulde recv %d\n", recvlen, sizeof(int));
@@ -2191,14 +2320,14 @@ void AddClientStore(unsigned int id, char *str){
 }
 
 void LogTyiadMsg(int mtype, int sorr, char *buf){
-  pngqm temp1;
-  pngrm temp2;
+  pngqm temp1,hello1;
+  pngrm temp2,hello2;
   pupqm temp3;
   pclqm temp4;
   pclrm temp5;
   pstqm temp6;
   pstrm temp7;
-  
+
   int id, id2, po, nni, nsi, nsp, nflag, ndi, nri, nrp, nsl, nhas;
   int msglen = 0;
   char writebuf[256];
@@ -2209,6 +2338,23 @@ void LogTyiadMsg(int mtype, int sorr, char *buf){
     comtype = "received";
   
   switch(mtype){
+  case HELLOPQ:
+    hello1 = (pngqm)buf;
+    id = ntohl(hello1->ni);
+    snprintf(writebuf, sizeof(writebuf), "hello-predecessor-q %s (0x%08x)\n", comtype, id);
+    logfilewriteline(logfilename, writebuf, strlen(writebuf));
+    msglen = sizeof(NGQM);
+    break;
+  case HELLOPR:
+    hello2 = (pngrm)buf;
+    id = ntohl(hello2->ni);
+    id2 = ntohl(hello2->si);
+    po = ntohl(hello2->sp);
+    snprintf(writebuf, sizeof(writebuf), "hello-predecessor-r %s (0x%08x 0x%08x %d)\n", comtype, id, id2, po);
+    logfilewriteline(logfilename, writebuf, strlen(writebuf));
+    msglen = sizeof(NGRM);
+    break;
+  
   case SUCCQ:
     temp1 = (pngqm)buf;
     id = ntohl(temp1->ni);

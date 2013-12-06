@@ -39,4 +39,4 @@ link: tools.o timers.o timers-c.o client.o projb.o manager.o comm.o sha1.o log.o
 	g++ -o projc projb.o manager.o client.o comm.o sha1.o log.o ring.o timers-c.o timers.o tools.o
 
 clean: 
-	rm -f *.o core *~ test-app test-app-c projc
+	rm -f *.o core *~ test-app test-app-c projc *.out

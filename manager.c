@@ -315,7 +315,7 @@ int manager(void)
 								nBytestosend = strlen(szSendbuf);
 								SendStreamData(itrPos->acceptDesc,szSendbuf,nBytestosend);
 								printf("Sending Kill to %s\n",szSendbuf);
-								sleep(5);
+								sleep(60);
 								printf("Manager is back!");
 							}
 

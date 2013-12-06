@@ -28,7 +28,7 @@
 
 #ifndef _CLIENT_H
 #define _CLIENT_H
-
+#include <netinet/in.h>
 // Triadnode
 typedef struct TriadNode{
   unsigned int id;
@@ -50,7 +50,8 @@ typedef struct TriadNode{
 #define LEAVR 22
 #define NXTDQ 23
 #define NXTDR 24
-
+#define HELLOPQ 31
+#define HELLOPR 32
 #define MAX_TEXT_SIZE 96
 
 #define HASHMAX 0xFFFFFFFF
@@ -61,12 +62,12 @@ typedef struct TriadNode{
 #define FTLEN 33
 
 // Triad messages
-typedef struct ngbrquerymsg{  // for successor query and predecessor query
+typedef struct ngbrquerymsg{  // for successor query and predecessor query, hello predecessor query
   int msgid;
   unsigned int  ni;
 }NGQM, *pngqm;
 
-typedef struct ngbrreplymsg{  // for successor reply and predecessor reply
+typedef struct ngbrreplymsg{  // for successor reply and predecessor reply. hello predecessor reply
   int msgid;
   unsigned int  ni;
   unsigned int  si;
@@ -184,14 +185,15 @@ int UpdateFingerTable(int sock, TNode tn, TNode sn, int idx);
 int UpdateMyFingerTable(int sock, TNode s, int idx);
 void UpdateMyFingerTableInit();
 void ClosestPrecedingFinger(unsigned int id, TNode *tn);
-
+void SendHelloPredecQuery();
 // functions that used in stage 4, 5
 int JoinRingWithFingerTable(int sock);
 int HandleEndClient(int sock);
 int LeaveUpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode);
 
 void AddClientStore(unsigned int id, char *str);
-
+void WrongPlaceHelloQuery(char *,struct sockaddr_in *);
+void WrongPlaceHelloReply(char *,struct sockaddr_in *);
 // debug only
 void LogFingerTable();
 #endif
