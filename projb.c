@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 		}
 		if (strcmp(sKeyword, "kill_client") == 0){
 			if (sscanf(confile_buf, "%s %s", sKeyword, sText) != 2)
-				errexit("config file wrong store statement.\n");
+				errexit("config file wrong kill statement.\n");
 			
 			// add kill job
 			AddKillClientName(sText);
@@ -168,7 +168,7 @@ int main(int argc, char *argv[])
 
 	// Check if configuration parameter read successfully
 	// projb only accept stage 2, 3, 4, 5
-	if (nClient <= 0 || nNonce < 0 || nStage < 2 || nStage > 5){
+	if (nClient <= 0 || nNonce < 0 || nStage < 2 || nStage > 7){
 		errexit("configuration file parameters wrong!\n");
 	}
 

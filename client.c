@@ -88,6 +88,9 @@ int TestTimer1_expire(void *context)
 
 //Rebuild The Ring after a client is dead.
 void RebuildRing(){
+TNode oldsucc;
+	oldsucc.id = succ.id;
+	oldsucc.port = succ.port; 
 
 //make my doublesucc as my succ.
 	succ.id = doublesucc.id;
@@ -137,6 +140,55 @@ void RebuildRing(){
   }
 //Reset my double successor.
   FindNeighbor(MyUDPSock, SUCCQ, succ, &doublesucc);
+
+//Replace my Successor in my finger table with my double successor
+  int i;
+  for(i=1;i<FTLEN;i++){
+	if(MyFT[i].node.id == oldsucc.id)
+	{
+		MyFT[i].node.id = succ.id;
+		MyFT[i].node.port = succ.port;
+	}
+  }  
+
+//Send new message telling your new successor that the old successor is dead.
+  KUQM killQueryMsg;
+  //struct sockaddr_in naaddr;
+  killQueryMsg.msgid = htonl(KILLQ);
+  killQueryMsg.ni = htonl(succ.id);
+  killQueryMsg.si = htonl(oldsucc.id);
+  killQueryMsg.di = htonl(succ.id);
+  killQueryMsg.dp = htonl((int)succ.port);
+
+  naaddr.sin_family = AF_INET;
+  naaddr.sin_port = htons(succ.port);
+  naaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  
+  memcpy(sendbuf, &killQueryMsg, sizeof(KUQM));
+  
+  if ((nSendbytes = sendto(MyUDPSock, sendbuf, sizeof(KUQM), 0, (struct sockaddr *)&naaddr, sizeof(naaddr))) != sizeof(KUQM)){
+    printf("projb error: update_neighbor sendto ret %d, should send %u\n", nSendbytes, sizeof(KUQM));
+  }
+  
+  // log
+  LogTyiadMsg(KILLQ, SENTFLAG, sendbuf);
+/*
+  // only receive reply after stage 4
+  if (nStage >= 2){
+    // receive reply
+    *********************************************************************
+    *** for stage >= 6, needs to judge if the hello messages comes here ******
+    *********************************************************************
+	struct sockaddr_in cliaddr;
+	socklen_t sa_len = sizeof(cliaddr);	
+    if ((nRecvbytes = recvfrom(MyUDPSock, recvbuf, sizeof(KURM), 0, (struct sockaddr*)&cliaddr,&sa_len)) != sizeof(KURM)){
+      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(KURM));
+
+    }
+	
+  LogTyiadMsg(KILLR, RECVFLAG, recvbuf);
+  }*/
+
 
 }
 //
@@ -308,7 +360,8 @@ int client(int mgrport)
 
 	// Create callback classes and set up pointers
 	tt1_ctx.count = 0;
-	Timers_AddTimer(3000, TestTimer1_expire, (void*)&tt1_ctx);
+	SendHelloPredecQuery();
+	Timers_AddTimer(10000, TestTimer1_expire, (void*)&tt1_ctx);
 
   
   // main select loop
@@ -332,17 +385,7 @@ int client(int mgrport)
     }
     else if(ret == 0)
 	{
-	//	printf("EXPIRED!!!\n");
-			/* Timer expired, Hence process it  */
 			        Timers_ExecuteNextTimer();
-				/* Execute all timers that have expired.
-				Timers_NextTimerTime(&tmv);
-				while(tmv.tv_sec == 0 && tmv.tv_usec == 0) {
-					* Timer at the head of the queue has expired  
-				        Timers_ExecuteNextTimer();
-					Timers_NextTimerTime(&tmv);
-					
-				}*/
 	}
     else{
  
@@ -619,7 +662,7 @@ int JoinRing(int sock){
 
 int JoinRingWithFingerTable(int sock){
   char  wbuf[128];
-  
+ printf("\n=======In Join ring with FT\n"); 
   if (HashID != HashIDfirst){ // not first node
     if (InitFingerTable(sock) < 0){
       printf("projb client %s: InitFingerTable fails!\n", Myname);
@@ -636,7 +679,8 @@ int JoinRingWithFingerTable(int sock){
   }
 
   //Set the double successor.
-  FindNeighbor(sock, SUCCQ, succ, &doublesucc); 
+  FindNeighbor(sock, SUCCQ, succ, &doublesucc);
+  printf("\n\n##############3SET DSUCC as %08x %d\n",doublesucc.id,doublesucc.port); 
 
   // join finishes, write log
   snprintf(wbuf, sizeof(wbuf), "client %s created with hash 0x%08x\n", Myname, HashID);
@@ -1234,6 +1278,8 @@ int HandleUdpMessage(int sock){
   pupqm ptr;
   pngqm nptr;
   pngrm nrptr;
+  pkuqm kptr;
+  pkurm krptr;
   int ret;
   
   
@@ -1248,13 +1294,77 @@ int HandleUdpMessage(int sock){
   msgtype = ntohl(*tmp);
   
   switch(msgtype){
+  case KILLQ:
+	kptr = (pkuqm)recvbuf;
+	//Sanity check
+	if(ntohl(kptr->ni) == HashID){
+		if(HashID == ntohl(kptr->di))
+			break;
+		LogTyiadMsg(KILLQ,RECVFLAG,recvbuf);
+		//Update my finger table
+		int i;
+		for(i=1;i<FTLEN;i++){
+			if(MyFT[i].node.id == ntohl(kptr->si))
+			{
+				MyFT[i].node.id = ntohl(kptr->di);
+				MyFT[i].node.port = ntohl(kptr->dp);
+			}
+		}
+  
+		//Send reply to sender
+		KURM kumsg;
+		kumsg.msgid = ntohl(KILLR);
+		kumsg.ni = kptr->ni;
+		kumsg.si = kptr->si;
+		kumsg.di = kptr->di;
+		kumsg.dp = kptr->dp;
+		memcpy(sendbuf, &kumsg, sizeof(KURM));
+		if ((sendlen = sendto(sock, sendbuf, sizeof(kumsg), 0, (struct sockaddr *)&cliaddr, sa_len)) != sizeof(kumsg)){
+		      	printf("projb error: HandleUdpMessage sendto ret %d, shoulde send %u\n", sendlen, sizeof(kumsg));
+  			return -1;
+    		}
+		printf("\n\nKILLQ sent %d bytes \n\n",sendlen);
+	    	LogTyiadMsg(KILLQ, SENTFLAG, sendbuf);
+	
+	
+		//Now send a kill update query to my successor to tell it to update its finger tables.
+	        KUQM killQueryMsg;
+		struct sockaddr_in naaddr;
+  		killQueryMsg.msgid = htonl(KILLQ);
+	  	killQueryMsg.ni = htonl(succ.id);
+  		killQueryMsg.si = kptr->si;
+  		killQueryMsg.di = kptr->di;
+	 	 killQueryMsg.dp = kptr->dp;
+
+  		naaddr.sin_family = AF_INET;
+  		naaddr.sin_port = htons(succ.port);
+  		naaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  
+  		memcpy(sendbuf, &killQueryMsg, sizeof(KUQM));
+  
+  		if ((sendlen = sendto(MyUDPSock, sendbuf, sizeof(KUQM), 0, (struct sockaddr *)&naaddr, sizeof(naaddr))) != sizeof(KUQM)){
+    			printf("projb error: update_neighbor sendto ret %d, should send %u\n", sendlen, sizeof(KUQM));
+  		}
+  
+		  // log
+		  LogTyiadMsg(KILLQ, SENTFLAG, sendbuf);
+	
+	}
+	break;
+  case KILLR:
+	krptr = (pkurm)recvbuf;
+	if(ntohl(krptr->ni) == HashID){
+		LogTyiadMsg(KILLR,RECVFLAG,recvbuf);
+	}
+	break;
+	
   case HELLOPQ:
-	printf("\nSomeone received hello query\n");
+//	printf("\nSomeone received hello query\n");
 	nptr = (pngqm)recvbuf;
 
 	//sanity check
 	if(ntohl(nptr->ni) == HashID){
-		printf("Hello q id : %08x HashId %08x",ntohl(nptr->ni),HashID);
+//		printf("Hello q id : %08x HashId %08x",ntohl(nptr->ni),HashID);
 		 LogTyiadMsg(HELLOPQ, RECVFLAG, recvbuf);
     
 	    	NGRM helloprlp;
@@ -1267,7 +1377,7 @@ int HandleUdpMessage(int sock){
 		      	printf("projb error: HandleUdpMessage sendto ret %d, shoulde send %u\n", sendlen, sizeof(helloprlp));
   			return -1;
     		}
-		printf("\n\nHELLOPQ sent %d bytes \n\n",sendlen);
+//		printf("\n\nHELLOPQ sent %d bytes \n\n",sendlen);
 	    	LogTyiadMsg(HELLOPR, SENTFLAG, sendbuf);
 	}
 	break;
@@ -1276,7 +1386,7 @@ int HandleUdpMessage(int sock){
 	nrptr = (pngrm)recvbuf;
 	//sanity check
 	if(ntohl(nrptr->si) == HashID){
-		printf("\nREPLY AAAAALLLAAA\n");
+//		printf("\nREPLY AAAAALLLAAA\n");
 		LogTyiadMsg(HELLOPR, RECVFLAG, recvbuf);
 		succAlive = 1;
  	}

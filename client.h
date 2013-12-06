@@ -52,6 +52,8 @@ typedef struct TriadNode{
 #define NXTDR 24
 #define HELLOPQ 31
 #define HELLOPR 32
+#define KILLQ 33
+#define KILLR 34
 #define DSUCC 40
 #define MAX_TEXT_SIZE 96
 
@@ -63,6 +65,22 @@ typedef struct TriadNode{
 #define FTLEN 33
 
 // Triad messages
+typedef struct killupdatemsg{
+	int msgid;
+	unsigned int ni;
+	unsigned int si;
+	unsigned int di;
+	int dp;
+}KUQM, *pkuqm;
+
+typedef struct killupdatereply{
+	int msgid;
+	unsigned int ni;
+	unsigned int si;
+	unsigned int di;	
+	int dp;
+}KURM, *pkurm;
+
 typedef struct ngbrquerymsg{  // for successor query and predecessor query, hello predecessor query
   int msgid;
   unsigned int  ni;
