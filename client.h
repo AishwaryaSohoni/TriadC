@@ -52,6 +52,7 @@ typedef struct TriadNode{
 #define NXTDR 24
 #define HELLOPQ 31
 #define HELLOPR 32
+#define DSUCC 40
 #define MAX_TEXT_SIZE 96
 
 #define HASHMAX 0xFFFFFFFF
@@ -190,7 +191,7 @@ void SendHelloPredecQuery();
 int JoinRingWithFingerTable(int sock);
 int HandleEndClient(int sock);
 int LeaveUpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode);
-
+void RebuildRing();
 void AddClientStore(unsigned int id, char *str);
 void WrongPlaceHelloQuery(char *,struct sockaddr_in *);
 void WrongPlaceHelloReply(char *,struct sockaddr_in *);

@@ -60,7 +60,7 @@ int nCStore = 0;
 FTNODE  MyFT[FTLEN];  // finger table
 TNode succ; // successor node
 TNode pred; // predecessor node
-
+TNode doublesucc; //double successor pointer
 int succAlive;
 char logfilename[256];
 
@@ -77,14 +77,68 @@ int TestTimer1_expire(void *context)
 		printf("I'm %s....My successor is alive\n",Myname);
 		succAlive = 0;
 	}
-	else
+	else{
 		printf("I'm %s....My successor is dead\n",Myname);
+		RebuildRing();
+	}
 	
 	SendHelloPredecQuery();
 	return 0;
 }
 
+//Rebuild The Ring after a client is dead.
+void RebuildRing(){
 
+//make my doublesucc as my succ.
+	succ.id = doublesucc.id;
+	succ.port = doublesucc.port;
+
+//update my double succ(succ)'s predec
+  struct  sockaddr_in naaddr;
+  char  sendbuf[128];
+  char  recvbuf[128];
+  int nSendbytes, nRecvbytes;
+  UPQM  updmsg;
+  
+  // first change someone's predecessor
+  naaddr.sin_family = AF_INET;
+  naaddr.sin_port = htons(doublesucc.port);
+  naaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  
+  
+  updmsg.msgid = htonl(UPDTQ);
+  updmsg.ni = htonl(doublesucc.id);
+  updmsg.si = htonl(HashID);
+  updmsg.sp = htonl((int)MyUDPPort);
+  updmsg.i = htonl(0); // change predecessor
+  memcpy(sendbuf, &updmsg, sizeof(UPQM));
+  
+  if ((nSendbytes = sendto(MyUDPSock, sendbuf, sizeof(UPQM), 0, (struct sockaddr *)&naaddr, sizeof(naaddr))) != sizeof(UPQM)){
+    printf("projb error: update_neighbor sendto ret %d, should send %u\n", nSendbytes, sizeof(UPQM));
+  }
+  
+  // log
+  LogTyiadMsg(UPDTQ, SENTFLAG, sendbuf);
+
+  // only receive reply after stage 4
+  if (nStage >= 2){
+    // receive reply
+    /**********************************************************************
+    *** for stage >= 6, needs to judge if the hello messages comes here ******
+    **********************************************************************/
+	struct sockaddr_in cliaddr;
+	socklen_t sa_len = sizeof(cliaddr);	
+    if ((nRecvbytes = recvfrom(MyUDPSock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) != sizeof(UPRM)){
+      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+
+    }
+	
+  LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
+  }
+//Reset my double successor.
+  FindNeighbor(MyUDPSock, SUCCQ, succ, &doublesucc);
+
+}
 //
 // XXX Read and understand this function first!
 // 
@@ -581,6 +635,9 @@ int JoinRingWithFingerTable(int sock){
     }
   }
 
+  //Set the double successor.
+  FindNeighbor(sock, SUCCQ, succ, &doublesucc); 
+
   // join finishes, write log
   snprintf(wbuf, sizeof(wbuf), "client %s created with hash 0x%08x\n", Myname, HashID);
   logfilewriteline(logfilename, wbuf, strlen(wbuf));
@@ -994,7 +1051,7 @@ int UpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
     *** for stage >= 6, needs to judge if the hello messages comes here ******
     **********************************************************************/
 	struct sockaddr_in cliaddr;
-socklen_t sa_len = sizeof(cliaddr);	
+	socklen_t sa_len = sizeof(cliaddr);	
     if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) != sizeof(UPRM)){
       printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
       return -1;
