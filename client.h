@@ -54,7 +54,7 @@ typedef struct TriadNode{
 #define HELLOPR 32
 #define KILLQ 33
 #define KILLR 34
-#define DSUCC 40
+#define DSUCC 50
 #define MAX_TEXT_SIZE 96
 
 #define HASHMAX 0xFFFFFFFF
@@ -199,7 +199,7 @@ void InitFingerTableSelf();
 int InitFingerTable(int sock);
 int FindSuccWithFT(int sock, unsigned int id, TNode *retnode);
 int UpdateOthers(int sock);
-
+void UpdateDoubleSuccessor(int);
 int UpdateFingerTable(int sock, TNode tn, TNode sn, int idx);
 int UpdateMyFingerTable(int sock, TNode s, int idx);
 void UpdateMyFingerTableInit();

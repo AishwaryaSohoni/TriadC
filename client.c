@@ -131,10 +131,27 @@ TNode oldsucc;
     **********************************************************************/
 	struct sockaddr_in cliaddr;
 	socklen_t sa_len = sizeof(cliaddr);	
-    if ((nRecvbytes = recvfrom(MyUDPSock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) != sizeof(UPRM)){
+    if ((nRecvbytes = recvfrom(MyUDPSock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) < 0 ){
       printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
 
     }
+	int *tmp;
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(MyUDPSock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr, NULL)) != sizeof(UPRM)){
+		      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+		      //return -1;
+		    }		
+	}
+
 	
   LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
   }
@@ -335,7 +352,7 @@ int client(int mgrport)
   fd_set  readset;
   fd_set  allset;
   struct timeval tmv;
-
+ 
   tmv.tv_sec = SELECT_TIMEOUT; 
   tmv.tv_usec = 0;
   int sockMax;
@@ -360,6 +377,7 @@ int client(int mgrport)
 
 	// Create callback classes and set up pointers
 	tt1_ctx.count = 0;
+	//Send the hello query. start timer, wait for other messages.
 	SendHelloPredecQuery();
 	Timers_AddTimer(10000, TestTimer1_expire, (void*)&tt1_ctx);
 
@@ -682,6 +700,8 @@ int JoinRingWithFingerTable(int sock){
   FindNeighbor(sock, SUCCQ, succ, &doublesucc);
   printf("\n\n##############3SET DSUCC as %08x %d\n",doublesucc.id,doublesucc.port); 
 
+  UpdateDoubleSuccessor(MyUDPSock); 
+
   // join finishes, write log
   snprintf(wbuf, sizeof(wbuf), "client %s created with hash 0x%08x\n", Myname, HashID);
   logfilewriteline(logfilename, wbuf, strlen(wbuf));
@@ -971,6 +991,25 @@ int FindNeighbor(int sock, int msgtype, TNode na, TNode *pnb){
     printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(NGRM));
     return -1;
   }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(NGRM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
   
   // wirte log
   LogTyiadMsg((msgtype+1), RECVFLAG, recvbuf);
@@ -1060,6 +1099,122 @@ int FindSuccWithFT(int sock, unsigned int id, TNode *retnode){
 }
 
 
+void UpdateDoubleSuccessor(int sock){
+  struct  sockaddr_in naaddr;
+  char  sendbuf[128];
+  char  recvbuf[128];
+  int nSendbytes, nRecvbytes;
+  UPQM  updmsg;
+  TNode pprev;
+
+  //Get the predecessor of predecessor
+  FindNeighbor(sock,PREDQ,pred,&pprev);
+	
+printf("\n@@@@@@@@@@@ Updating Double successor of %08x to %08x and that of %08x to %08x @@@@@@@@@@@@@@@@@@@@@@@@@@@\n",pred.id,succ.id,pprev.id,HashID);
+  // first change previous node's double successor
+  naaddr.sin_family = AF_INET;
+  naaddr.sin_port = htons(pred.port);
+  naaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  
+  
+  updmsg.msgid = htonl(UPDTQ);
+  updmsg.ni = htonl(pred.id);
+  updmsg.si = htonl(succ.id);
+  updmsg.sp = htonl(succ.port);
+  updmsg.i = htonl(50); // change double successor
+  memcpy(sendbuf, &updmsg, sizeof(UPQM));
+  
+  if ((nSendbytes = sendto(sock, sendbuf, sizeof(UPQM), 0, (struct sockaddr *)&naaddr, sizeof(naaddr))) != sizeof(UPQM)){
+    printf("projb error: update_neighbor sendto ret %d, should send %u\n", nSendbytes, sizeof(UPQM));
+  }
+  
+  // log
+  LogTyiadMsg(UPDTQ, SENTFLAG, sendbuf);
+
+  // only receive reply after stage 4
+  if (nStage >= 2){
+    // receive reply
+    /**********************************************************************
+    *** for stage >= 6, needs to judge if the hello messages comes here ******
+    **********************************************************************/
+	struct sockaddr_in cliaddr;
+	socklen_t sa_len = sizeof(cliaddr);	
+    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) < 0){
+      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+    }
+	int *tmp;
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr, NULL)) != sizeof(UPRM)){
+		      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+		 
+		    }		
+	}
+	LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
+ 
+  }
+ 
+//Then change the double succ of pprev
+  naaddr.sin_family = AF_INET;
+  naaddr.sin_port = htons(pprev.port);
+  naaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  
+  
+  updmsg.msgid = htonl(UPDTQ);
+  updmsg.ni = htonl(pprev.id);
+  updmsg.si = htonl(HashID);
+  updmsg.sp = htonl((int)MyUDPPort);
+  updmsg.i = htonl(50); // change double successor
+  memcpy(sendbuf, &updmsg, sizeof(UPQM));
+  
+  if ((nSendbytes = sendto(sock, sendbuf, sizeof(UPQM), 0, (struct sockaddr *)&naaddr, sizeof(naaddr))) <0 ){
+    printf("projb error: update_neighbor sendto ret %d, should send %u\n", nSendbytes, sizeof(UPQM));
+  }
+  
+  // log
+  LogTyiadMsg(UPDTQ, SENTFLAG, sendbuf);
+
+  // only receive reply after stage 4
+  if (nStage >= 2){
+    // receive reply
+    /**********************************************************************
+    *** for stage >= 6, needs to judge if the hello messages comes here ******
+    **********************************************************************/
+	struct sockaddr_in cliaddr;
+	socklen_t sa_len = sizeof(cliaddr);	
+    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) < 0){
+      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+    }
+	int *tmp;
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr, NULL)) != sizeof(UPRM)){
+		      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
+		    
+		    }		
+	}
+	LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
+ 
+  }
+ 
+
+}
 int UpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
   struct  sockaddr_in naaddr;
   char  sendbuf[128];
@@ -1096,7 +1251,7 @@ int UpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
     **********************************************************************/
 	struct sockaddr_in cliaddr;
 	socklen_t sa_len = sizeof(cliaddr);	
-    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) != sizeof(UPRM)){
+    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, (struct sockaddr*)&cliaddr,&sa_len)) < 0){
       printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
       return -1;
     }
@@ -1145,6 +1300,26 @@ int UpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
       printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
       return -1;
     }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(UPRM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
     LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
   }
   
@@ -1188,6 +1363,26 @@ int UpdateFingerTable(int sock, TNode tn, TNode sn, int idx){
     printf("projb error: UpdateFingerTable recvfrom ret %d, should recv %u\n", nRecvbytes, sizeof(UPRM));
     return -1;
   }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(UPRM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: update finger table recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
 
   // sanity check 
   ptr = (puprm)recvbuf;
@@ -1502,7 +1697,26 @@ int HandleUdpMessage(int sock){
         }
         LogTyiadMsg(UPDTR, SENTFLAG, sendbuf);
       }
-    }else{
+    }else if(idx == 50){ // update double successor
+      doublesucc.id = ntohl(ptr->si);
+      doublesucc.port = ntohl(ptr->sp);
+       // send reply 
+        UPRM uprmsg;
+        uprmsg.msgid = htonl(UPDTR);
+        uprmsg.ni = htonl(HashID);
+        uprmsg.r = htonl(1);
+        uprmsg.si = ptr->si;
+        uprmsg.sp = ptr->sp;
+        uprmsg.i = ptr->i;
+        memcpy(sendbuf, &uprmsg, sizeof(UPRM));
+        if ((sendlen = sendto(sock, sendbuf, sizeof(UPRM), 0, (struct sockaddr *)&cliaddr, sa_len)) != sizeof(UPRM)){
+          printf("projb error: client %s HandleUdpMessage update-r send ret %d, should send %u\n", Myname, sendlen, sizeof(UPRM));
+          return -1;
+        }
+        LogTyiadMsg(UPDTR, SENTFLAG, sendbuf);
+      }
+
+    else{
       if (nStage < 4){
         printf("projb exception: unknown update-q message %d in stage2.\n", ntohl(ptr->i));
       }else{
@@ -1728,6 +1942,26 @@ int HandleUdpMessage(int sock){
             printf("projb %s error: HandleUdpMessage NXTDR recvfrom fail\n", Myname);
             return -1;
           }
+		//Check for hello messages
+		int *tmp;
+		struct sockaddr_in cliaddr;
+		int oldtype = sizeof(recvbuf); 
+		tmp = (int *)recvbuf;
+	  	int msgCode = ntohl(*tmp);
+	        if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((recvlen = recvfrom(sock, recvbuf, oldtype, 0, NULL, NULL)) < 0){
+		      printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", recvlen, oldtype);
+		      return -1;
+		    }		
+	}
+ 
           LogTyiadMsg(NXTDR, RECVFLAG, recvbuf);
           pnxrptr = (pnxrm)recvbuf;
           length = ntohl(pnxrptr->sl);
@@ -1785,7 +2019,26 @@ int HandleUdpMessage(int sock){
           printf("projb error: HandleUdpMessage succ-r recvfrom ret %d, should recv %u\n", recvlen, sizeof(NGRM));
           return -1;
         }
-  
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(recvbuf); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+	    if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((recvlen = recvfrom(sock, recvbuf, oldtype, 0, NULL, NULL)) < 0){
+		      printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", recvlen, oldtype);
+		      return -1;
+		    }		
+	}
+   
         LogTyiadMsg(SUCCR, RECVFLAG, recvbuf);
   
         pngr = (pngrm)recvbuf;
@@ -1944,6 +2197,26 @@ int HandleStoreMsg(int sock, char *str){
     printf("projb error: HandleStoreMsg recvfrom error.\n" );
     return -1;
   }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(recvbuf); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, NULL, NULL)) < 0){
+		      printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
   
   pstorer = (pstrm)recvbuf;
   if (ntohl(pstorer->msgid) != STORR || TempB.id != ntohl(pstorer->ni)){
@@ -2131,7 +2404,26 @@ int HandleEndClient(int sock){
       printf("projb %s error: HandleEndClient recvfrom ret %d, should recv %u\n", Myname, nRecvbytes, sizeof(NXQM));
       return -1;
     }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(NXQM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+	if(msgCode == 31 || msgCode == 32){
 
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: handle_end client recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
     // sanity check
     nxqptr = (pnxqm)recvbuf;
     if (ntohl(nxqptr->msgid) != NXTDQ || ntohl(nxqptr->di) != HashID){
@@ -2185,6 +2477,26 @@ int HandleEndClient(int sock){
     printf("projb %s error: HandleEndClient recvfrom ret %d, should recv %u\n", Myname, nRecvbytes, sizeof(LERM));
     return -1;
   }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(LERM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: HandleEndClient recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
   LogTyiadMsg(LEAVR, RECVFLAG, recvbuf);
 
   // now update other finger table
@@ -2241,6 +2553,26 @@ int HandleEndClient(int sock){
         printf("projb %s error: HandleEndClient recv succ-q recvfrom ret %d, shoulde recv %u\n", Myname, nRecvbytes, sizeof(NGQM));
         return -1;
       }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(NGQM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
       succqptr = (pngqm)recvbuf;
       if (ntohl(succqptr->msgid) != SUCCQ){
         printf("projb %s error: HandleEndClient recv succ-q, wrong message recved!\n", Myname);
@@ -2264,10 +2596,29 @@ int HandleEndClient(int sock){
   /**********************************************************************
   *** for stage >= 6, needs to judge if the hello messages comes here ******
   **********************************************************************/
-      if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(LERM), 0, NULL, NULL)) != sizeof(LERM)){
+      if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(LERM), 0, NULL, NULL)) < 0){
         printf("projb %s error: HandleEndClient update loop leav-r recvfrom ret %d, shoulde recv %u\n", Myname, nRecvbytes, sizeof(LERM));
         return -1;
       }
+	//Check for hello messages
+//	struct sockaddr_in cliaddr;
+	oldtype = sizeof(LERM); 
+	tmp = (int *)recvbuf;
+  	msgCode = ntohl(*tmp);
+    	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: HandleEndClient recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
       LogTyiadMsg(LEAVR, RECVFLAG, recvbuf);
 
       // get temppr's predecessor
@@ -2331,10 +2682,30 @@ int LeaveUpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
   /**********************************************************************
   *** for stage >= 6, needs to judge if the hello messages comes here ******
   **********************************************************************/
-    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, NULL, NULL)) != sizeof(UPRM)){
+    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, NULL, NULL)) < 0){
       printf("projb error: update_neighbor recvfrom ret %d, shoulde recv %u\n", nRecvbytes, sizeof(UPRM));
       return -1;
     }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(UPRM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: find_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
     LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
   }
   
@@ -2361,10 +2732,30 @@ int LeaveUpdateNeighbor(int sock, TNode *chgpreNode, TNode *chgsucNode){
   /**********************************************************************
   *** for stage >= 6, needs to judge if the hello messages comes here ******
   **********************************************************************/
-    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, NULL, NULL)) != sizeof(UPRM)){
+    if ((nRecvbytes = recvfrom(sock, recvbuf, sizeof(UPRM), 0, NULL, NULL)) < 0){
       printf("projb error: update_neighbor recvfrom ret %d, shoulde recv %u\n", nRecvbytes, sizeof(UPRM));
       return -1;
     }
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(UPRM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: update_neighbor recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+ 
     LogTyiadMsg(UPDTR, RECVFLAG, recvbuf);
   }
   
@@ -2438,7 +2829,26 @@ int FindClosest(int sock, int msgt, unsigned int targetid, TNode na, TNode *pnb)
     printf("projb error: find_closest recvfrom ret %d, shoulde recv %u\n", nRecvbytes, sizeof(CLRM));
     return -1;
   }
-  
+	//Check for hello messages
+	int *tmp;
+	struct sockaddr_in cliaddr;
+	int oldtype = sizeof(CLRM); 
+	tmp = (int *)recvbuf;
+  	int msgCode = ntohl(*tmp);
+    	if(msgCode == 31 || msgCode == 32){
+
+		if(msgCode == 31){
+			WrongPlaceHelloQuery(recvbuf,&cliaddr);
+		}
+		else if(msgCode == 32){
+			WrongPlaceHelloReply(recvbuf,&cliaddr);
+		}
+		if ((nRecvbytes = recvfrom(sock, recvbuf, oldtype, 0, (struct sockaddr*)&cliaddr, NULL)) < 0){
+		      printf("projb error: find_closest recvfrom ret %d, should recv %u\n", nRecvbytes, oldtype);
+		      return -1;
+		    }		
+	}
+   
   premsg = (pclrm)recvbuf;
   
   if ((msgt+1) != ntohl(premsg->msgid) || na.id != ntohl(premsg->ni)){
